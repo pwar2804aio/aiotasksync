@@ -31,32 +31,28 @@ async function hubspotPost(endpoint: string, body: any) {
   return res.json();
 }
 
-export async function getCompanies() {
-  const all: any[] = [];
-  let after: string | undefined;
-  do {
-    const params = new URLSearchParams({ limit: '100', properties: 'name,domain' });
-    if (after) params.set('after', after);
-    const data = await hubspotGet(`/crm/v3/objects/companies?${params}`);
-    all.push(...(data.results || []));
-    after = data.paging?.next?.after;
-  } while (after);
-  all.sort((a, b) => (a.properties.name || '').localeCompare(b.properties.name || ''));
-  return all;
+export async function searchCompanies(query: string) {
+  const body: any = {
+    limit: 50,
+    properties: ['name', 'domain'],
+    sorts: [{ propertyName: 'name', direction: 'ASCENDING' }],
+  };
+  if (query) {
+    body.query = query;
+  }
+  return hubspotPost('/crm/v3/objects/companies/search', body);
 }
 
-export async function getDeals() {
-  const all: any[] = [];
-  let after: string | undefined;
-  do {
-    const params = new URLSearchParams({ limit: '100', properties: 'dealname,dealstage,amount,pipeline' });
-    if (after) params.set('after', after);
-    const data = await hubspotGet(`/crm/v3/objects/deals?${params}`);
-    all.push(...(data.results || []));
-    after = data.paging?.next?.after;
-  } while (after);
-  all.sort((a, b) => (a.properties.dealname || '').localeCompare(b.properties.dealname || ''));
-  return all;
+export async function searchDeals(query: string) {
+  const body: any = {
+    limit: 50,
+    properties: ['dealname', 'dealstage', 'amount', 'pipeline'],
+    sorts: [{ propertyName: 'dealname', direction: 'ASCENDING' }],
+  };
+  if (query) {
+    body.query = query;
+  }
+  return hubspotPost('/crm/v3/objects/deals/search', body);
 }
 
 export async function createNote(objectType: 'companies' | 'deals', objectId: string, noteBody: string) {

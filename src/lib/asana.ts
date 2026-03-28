@@ -24,9 +24,21 @@ export async function getProjects(workspaceId?: string) {
     if (workspaces.length === 0) throw new Error('No Asana workspaces found');
     workspaceId = workspaces[0].gid;
   }
-  const endpoint = `/workspaces/${workspaceId}/projects?opt_fields=name,archived&limit=100`;
-  const data = await asanaGet(endpoint);
-  return (data.data as any[]).filter((p: any) => !p.archived);
+
+  // Paginate through ALL projects so none are missing
+  const all: any[] = [];
+  let offset: string | undefined;
+  do {
+    let endpoint = `/workspaces/${workspaceId}/projects?opt_fields=name,archived&limit=100`;
+    if (offset) endpoint += `&offset=${offset}`;
+    const data = await asanaGet(endpoint);
+    const active = (data.data || []).filter((p: any) => !p.archived);
+    all.push(...active);
+    offset = data.next_page?.offset;
+  } while (offset);
+
+  all.sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  return all;
 }
 
 export async function getProjectTasks(projectId: string) {

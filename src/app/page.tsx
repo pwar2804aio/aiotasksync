@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 
 interface Company { id: string; properties: { name: string; domain?: string } }
@@ -17,17 +17,18 @@ export default function HomePage() {
   const [companies, setCompanies] = useState<Company[]>([]);
   const [deals, setDeals] = useState<Deal[]>([]);
   const [projects, setProjects] = useState<AsanaProject[]>([]);
+  const [projectSearch, setProjectSearch] = useState('');
   const [mappings, setMappings] = useState<Mappings>({ companies: {}, deals: {} });
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
+  const [searching, setSearching] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncResults, setSyncResults] = useState<SyncResult[] | null>(null);
   const [asanaOk, setAsanaOk] = useState(false);
   const [hubspotOk, setHubspotOk] = useState(false);
+  const searchTimer = useRef<any>(null);
 
-  useEffect(() => {
-    checkAuth();
-  }, []);
+  useEffect(() => { checkAuth(); }, []);
 
   async function checkAuth() {
     const res = await fetch('/api/auth/me');
@@ -47,24 +48,45 @@ export default function HomePage() {
         fetch('/api/mappings'),
       ]);
 
-      if (companiesRes.ok && dealsRes.ok) {
-        setCompanies(await companiesRes.json());
-        setDeals(await dealsRes.json());
-        setHubspotOk(true);
+      if (companiesRes.ok) {
+        const c = await companiesRes.json();
+        if (!c.error) { setCompanies(c); setHubspotOk(true); }
       }
-
+      if (dealsRes.ok) {
+        const d = await dealsRes.json();
+        if (!d.error) setDeals(d);
+      }
       if (projectsRes.ok) {
         const p = await projectsRes.json();
         if (!p.error) { setProjects(p); setAsanaOk(true); }
       }
-
       if (mappingsRes.ok) {
-        setMappings(await mappingsRes.json());
+        const m = await mappingsRes.json();
+        if (!m.error) setMappings(m);
       }
     } catch (err) {
       console.error('Load error:', err);
     }
     setLoading(false);
+  }
+
+  // Debounced server-side search for HubSpot
+  function handleSearch(value: string) {
+    setSearch(value);
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(async () => {
+      setSearching(true);
+      try {
+        if (tab === 'companies') {
+          const res = await fetch(`/api/hubspot/companies?q=${encodeURIComponent(value)}`);
+          if (res.ok) setCompanies(await res.json());
+        } else {
+          const res = await fetch(`/api/hubspot/deals?q=${encodeURIComponent(value)}`);
+          if (res.ok) setDeals(await res.json());
+        }
+      } catch {}
+      setSearching(false);
+    }, 400);
   }
 
   async function saveMappings(updated: Mappings) {
@@ -117,12 +139,10 @@ export default function HomePage() {
 
   const mappingCount = Object.keys(mappings.companies).length + Object.keys(mappings.deals).length;
 
-  const filteredCompanies = companies.filter(c =>
-    (c.properties.name || '').toLowerCase().includes(search.toLowerCase())
-  );
-  const filteredDeals = deals.filter(d =>
-    (d.properties.dealname || '').toLowerCase().includes(search.toLowerCase())
-  );
+  // Filter Asana projects by search text
+  const filteredProjects = projectSearch
+    ? projects.filter(p => p.name.toLowerCase().includes(projectSearch.toLowerCase()))
+    : projects;
 
   if (!user) return null;
 
@@ -154,30 +174,44 @@ export default function HomePage() {
           </span>
           <span style={{ marginLeft: 16 }} className={`status-dot ${hubspotOk ? 'ok' : 'err'}`} />
           <span className="status-text">
-            {hubspotOk ? `HubSpot: ${companies.length} companies, ${deals.length} deals` : 'HubSpot: Not connected'}
+            {hubspotOk ? `HubSpot connected` : 'HubSpot: Not connected'}
           </span>
           <span style={{ flex: 1 }} />
           <span className="status-text">{mappingCount} mapping{mappingCount !== 1 ? 's' : ''} configured</span>
         </div>
 
+        {/* Asana project filter */}
+        {asanaOk && (
+          <div className="search-bar" style={{ marginBottom: 8 }}>
+            <input
+              type="text"
+              placeholder="Filter Asana projects in dropdowns..."
+              value={projectSearch}
+              onChange={e => setProjectSearch(e.target.value)}
+              style={{ borderColor: '#00bda5' }}
+            />
+          </div>
+        )}
+
         {/* Tabs */}
         <div className="tabs">
-          <div className={`tab ${tab === 'companies' ? 'active' : ''}`} onClick={() => { setTab('companies'); setSearch(''); }}>
+          <div className={`tab ${tab === 'companies' ? 'active' : ''}`} onClick={() => { setTab('companies'); setSearch(''); handleSearch(''); }}>
             Companies <span className="count">{companies.length}</span>
           </div>
-          <div className={`tab ${tab === 'deals' ? 'active' : ''}`} onClick={() => { setTab('deals'); setSearch(''); }}>
+          <div className={`tab ${tab === 'deals' ? 'active' : ''}`} onClick={() => { setTab('deals'); setSearch(''); handleSearch(''); }}>
             Deals <span className="count">{deals.length}</span>
           </div>
         </div>
 
-        {/* Search */}
+        {/* HubSpot Search */}
         <div className="search-bar">
           <input
             type="text"
-            placeholder={`Search ${tab}...`}
+            placeholder={`Search HubSpot ${tab}...`}
             value={search}
-            onChange={e => setSearch(e.target.value)}
+            onChange={e => handleSearch(e.target.value)}
           />
+          {searching && <div style={{ fontSize: 12, color: '#888', marginTop: 4 }}>Searching...</div>}
         </div>
 
         {/* Table */}
@@ -192,7 +226,7 @@ export default function HomePage() {
               <div className="mapping-row header">
                 <div>HubSpot Company</div><div /><div>Asana Project</div><div>Status</div>
               </div>
-              {filteredCompanies.map(c => {
+              {companies.map(c => {
                 const m = mappings.companies[c.id];
                 const isMapped = !!m?.projectId;
                 return (
@@ -212,7 +246,7 @@ export default function HomePage() {
                         }}
                       >
                         <option value="">— Select Asana Project —</option>
-                        {projects.map(p => (
+                        {filteredProjects.map(p => (
                           <option key={p.gid} value={p.gid}>{p.name}</option>
                         ))}
                       </select>
@@ -221,14 +255,14 @@ export default function HomePage() {
                   </div>
                 );
               })}
-              {filteredCompanies.length === 0 && <div className="empty"><p>No companies found</p></div>}
+              {companies.length === 0 && <div className="empty"><p>No companies found</p></div>}
             </>
           ) : (
             <>
               <div className="mapping-row header">
                 <div>HubSpot Deal</div><div /><div>Asana Project</div><div>Status</div>
               </div>
-              {filteredDeals.map(d => {
+              {deals.map(d => {
                 const m = mappings.deals[d.id];
                 const isMapped = !!m?.projectId;
                 const amount = d.properties.amount ? `$${parseFloat(d.properties.amount).toLocaleString()}` : '';
@@ -249,7 +283,7 @@ export default function HomePage() {
                         }}
                       >
                         <option value="">— Select Asana Project —</option>
-                        {projects.map(p => (
+                        {filteredProjects.map(p => (
                           <option key={p.gid} value={p.gid}>{p.name}</option>
                         ))}
                       </select>
@@ -258,7 +292,7 @@ export default function HomePage() {
                   </div>
                 );
               })}
-              {filteredDeals.length === 0 && <div className="empty"><p>No deals found</p></div>}
+              {deals.length === 0 && <div className="empty"><p>No deals found</p></div>}
             </>
           )}
         </div>
