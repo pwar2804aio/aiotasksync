@@ -106,7 +106,7 @@ export async function findSyncNotes(objectType: 'companies' | 'deals', objectId:
       try {
         const note = await hubspotGet(`/crm/v3/objects/notes/${noteId}?properties=hs_note_body`);
         const body = note.properties?.hs_note_body || '';
-        if (body.includes('<!-- aiotasksync -->')) {
+        if (body.includes('aiotasksync') || body.includes('AIO TaskSync')) {
           syncNoteIds.push(noteId);
         }
       } catch {}
@@ -128,7 +128,7 @@ export async function createNote(objectType: 'companies' | 'deals', objectId: st
   return hubspotPost('/crm/v3/objects/notes', {
     properties: {
       hs_timestamp: new Date().toISOString(),
-      hs_note_body: `<!-- aiotasksync -->${noteBody}`,
+      hs_note_body: noteBody,
     },
     associations: [
       {
