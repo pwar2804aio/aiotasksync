@@ -34,8 +34,15 @@ async function hubspotPost(endpoint: string, body: any) {
 export async function searchCompanies(query: string) {
   const body: any = {
     limit: 50,
-    properties: ['name', 'domain'],
+    properties: ['name', 'domain', 'num_associated_deals'],
     sorts: [{ propertyName: 'name', direction: 'ASCENDING' }],
+    filterGroups: [
+      {
+        filters: [
+          { propertyName: 'num_associated_deals', operator: 'GT', value: '0' },
+        ],
+      },
+    ],
   };
   if (query) {
     body.query = query;
