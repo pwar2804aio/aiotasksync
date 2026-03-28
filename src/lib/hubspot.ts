@@ -6,7 +6,7 @@ async function hubspotGet(endpoint: string) {
       Authorization: `Bearer ${HUBSPOT_TOKEN()}`,
       'Content-Type': 'application/json',
     },
-    next: { revalidate: 0 },
+    cache: 'no-store',
   });
   if (!res.ok) {
     const text = await res.text();

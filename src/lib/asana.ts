@@ -3,7 +3,7 @@ const ASANA_TOKEN = () => process.env.ASANA_TOKEN || '';
 async function asanaGet(endpoint: string) {
   const res = await fetch(`https://app.asana.com/api/1.0${endpoint}`, {
     headers: { Authorization: `Bearer ${ASANA_TOKEN()}` },
-    next: { revalidate: 0 },
+    cache: 'no-store',
   });
   if (!res.ok) {
     const text = await res.text();
@@ -18,9 +18,13 @@ export async function getWorkspaces() {
 }
 
 export async function getProjects(workspaceId?: string) {
-  const endpoint = workspaceId
-    ? `/workspaces/${workspaceId}/projects?opt_fields=name,archived&limit=100`
-    : '/projects?opt_fields=name,archived&limit=100';
+  // Auto-detect workspace if not provided
+  if (!workspaceId) {
+    const workspaces = await getWorkspaces();
+    if (workspaces.length === 0) throw new Error('No Asana workspaces found');
+    workspaceId = workspaces[0].gid;
+  }
+  const endpoint = `/workspaces/${workspaceId}/projects?opt_fields=name,archived&limit=100`;
   const data = await asanaGet(endpoint);
   return (data.data as any[]).filter((p: any) => !p.archived);
 }
