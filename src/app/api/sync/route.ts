@@ -6,7 +6,7 @@ import { runFullSync } from '@/lib/sync';
 export async function POST() {
   try {
     await requireAuth();
-    const results = await runFullSync();
+    const results = await runFullSync(true);
     return NextResponse.json({ results });
   } catch (err: any) {
     const status = err.message === 'Unauthorized' ? 401 : 500;
