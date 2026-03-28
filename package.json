@@ -13,7 +13,8 @@
     "react-dom": "^18.2.0",
     "bcryptjs": "^2.4.3",
     "jsonwebtoken": "^9.0.2",
-    "cookie": "^0.6.0"
+    "cookie": "^0.6.0",
+    "@vercel/kv": "^2.0.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",

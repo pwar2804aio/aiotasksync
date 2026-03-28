@@ -1,97 +1,119 @@
 import { getMappings, getSyncState, saveSyncState, type SyncState } from './store';
-import { getProjectTasks, getSubtasks, getProjectInfo } from './asana';
+import { getProjectTasksBySections, getSubtasksDeep, getProjectInfo } from './asana';
 import { createNote, deleteNote, findSyncNotes } from './hubspot';
 
-// Build a rich, readable HTML note from Asana project data
-async function buildProjectNote(projectName: string, tasks: any[]): Promise<string | null> {
-  if (!tasks.length) return null;
+// Render subtasks recursively as indented list
+function renderSubtasks(subtasks: any[], indent: number = 0): string {
+  let html = '';
+  const pad = 16 + (indent * 16);
+  for (const s of subtasks) {
+    const assignee = s.assignee?.name ? ` — <em>${s.assignee.name}</em>` : '';
+    const due = s.due_on ? ` (due ${s.due_on})` : '';
+    if (s.completed) {
+      const completedDate = s.completed_at
+        ? new Date(s.completed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+        : '';
+      html += `<div style="padding-left:${pad}px;color:#888">`;
+      html += `<span style="color:#00a86b">&#10003;</span> <s>${s.name}</s>${assignee}`;
+      if (completedDate) html += ` <span style="font-size:11px">(completed ${completedDate})</span>`;
+      html += `</div>`;
+    } else {
+      html += `<div style="padding-left:${pad}px">`;
+      html += `&#9744; <strong>${s.name}</strong>${assignee}${due}`;
+      html += `</div>`;
+    }
+    // Nested subtasks
+    if (s.subtasks?.length) {
+      html += renderSubtasks(s.subtasks, indent + 1);
+    }
+  }
+  return html;
+}
 
-  const incomplete = tasks.filter(t => !t.completed);
-  const complete = tasks.filter(t => t.completed);
+// Build the full project note
+async function buildProjectNote(
+  projectName: string,
+  sectionedTasks: { section: string; tasks: any[] }[]
+): Promise<string | null> {
+  // Flatten all tasks for stats
+  const allTasks = sectionedTasks.flatMap(s => s.tasks);
+  if (!allTasks.length) return null;
+
+  const incomplete = allTasks.filter(t => !t.completed);
+  const complete = allTasks.filter(t => t.completed);
   const now = new Date().toLocaleDateString('en-US', {
     year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit',
   });
+  const today = new Date().toISOString().split('T')[0];
 
-  // Group tasks by section
-  const sections: Record<string, any[]> = {};
-  for (const t of incomplete) {
-    const sectionName = t.memberships?.[0]?.section?.name || 'No Section';
-    if (!sections[sectionName]) sections[sectionName] = [];
-    sections[sectionName].push(t);
-  }
-
-  // Progress bar calculation
-  const total = tasks.length;
+  // Progress
+  const total = allTasks.length;
   const doneCount = complete.length;
-  const pct = Math.round((doneCount / total) * 100);
-  const barFill = Math.round(pct / 5); // 20 chars wide
-  const bar = '█'.repeat(barFill) + '░'.repeat(20 - barFill);
+  const pct = total > 0 ? Math.round((doneCount / total) * 100) : 0;
 
   let html = '';
 
-  // Header
-  html += `<h2>📋 ${projectName}</h2>`;
+  // ===== HEADER =====
+  html += `<h2>${projectName}</h2>`;
   html += `<p><strong>Last synced:</strong> ${now}</p>`;
+  html += `<p><strong>Progress:</strong> ${pct}% complete (${doneCount} of ${total} tasks done)</p>`;
 
-  // Progress summary
-  html += `<p><strong>Progress:</strong> ${bar} ${pct}% (${doneCount}/${total} tasks)</p>`;
-  html += `<p><strong>Open:</strong> ${incomplete.length} | <strong>Completed:</strong> ${complete.length}</p>`;
-
-  // Overdue tasks callout
-  const today = new Date().toISOString().split('T')[0];
+  // Overdue warning
   const overdue = incomplete.filter(t => t.due_on && t.due_on < today);
   if (overdue.length) {
-    html += `<p style="color:#cc0000;font-weight:bold">⚠️ ${overdue.length} overdue task${overdue.length > 1 ? 's' : ''}</p>`;
+    html += `<p style="color:#cc0000"><strong>OVERDUE: ${overdue.length} task${overdue.length > 1 ? 's' : ''} past due date</strong></p>`;
   }
 
-  // Open tasks by section
-  if (incomplete.length) {
-    for (const [sectionName, sectionTasks] of Object.entries(sections)) {
-      html += `<h3>${sectionName} (${sectionTasks.length})</h3>`;
-      html += '<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%">';
-      html += '<tr style="background:#f0f0f0"><th style="text-align:left">Task</th><th>Assignee</th><th>Due</th><th>Tags</th></tr>';
+  html += '<hr/>';
 
-      for (const t of sectionTasks) {
-        const assignee = t.assignee?.name || '<em>Unassigned</em>';
+  // ===== OPEN TASKS BY SECTION =====
+  for (const { section, tasks } of sectionedTasks) {
+    const sectionOpen = tasks.filter(t => !t.completed);
+    const sectionDone = tasks.filter(t => t.completed);
+
+    if (sectionOpen.length === 0 && sectionDone.length === 0) continue;
+
+    html += `<h3>${section} <span style="color:#888;font-weight:normal">(${sectionDone.length}/${tasks.length} done)</span></h3>`;
+
+    // Open tasks in this section
+    if (sectionOpen.length > 0) {
+      html += '<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%;margin-bottom:8px">';
+      html += '<tr style="background:#f5f5f5"><th style="text-align:left">Task</th><th style="width:120px">Assignee</th><th style="width:90px">Due</th></tr>';
+
+      for (const t of sectionOpen) {
+        const assignee = t.assignee?.name || '<span style="color:#ccc">Unassigned</span>';
         const due = t.due_on || '—';
         const isOverdue = t.due_on && t.due_on < today;
         const dueStyle = isOverdue ? 'color:#cc0000;font-weight:bold' : '';
-        const tags = (t.tags || []).map((tg: any) => tg.name).join(', ') || '—';
+        const tags = (t.tags || []).map((tg: any) => `<span style="background:#e8e8e8;padding:1px 6px;border-radius:3px;font-size:11px">${tg.name}</span>`).join(' ');
 
-        // Task name with description preview
+        // Task name
         let taskCell = `<strong>${t.name}</strong>`;
+        if (tags) taskCell += ` ${tags}`;
+
+        // Description
         if (t.notes) {
-          const preview = t.notes.substring(0, 100).replace(/\n/g, ' ');
-          taskCell += `<br/><span style="color:#666;font-size:12px">${preview}${t.notes.length > 100 ? '...' : ''}</span>`;
+          const preview = t.notes.substring(0, 150).replace(/\n/g, ' ').replace(/</g, '&lt;');
+          taskCell += `<br/><span style="color:#666;font-size:12px">${preview}${t.notes.length > 150 ? '...' : ''}</span>`;
         }
 
         html += `<tr>`;
         html += `<td>${taskCell}</td>`;
         html += `<td style="text-align:center">${assignee}</td>`;
         html += `<td style="text-align:center;${dueStyle}">${due}</td>`;
-        html += `<td style="text-align:center">${tags}</td>`;
         html += `</tr>`;
 
-        // Subtasks (fetch if task has them)
+        // Subtasks
         if (t.num_subtasks > 0) {
           try {
-            const subtasks = await getSubtasks(t.gid);
-            const subOpen = subtasks.filter(s => !s.completed);
-            const subDone = subtasks.filter(s => s.completed);
-
-            html += `<tr><td colspan="4" style="padding-left:24px;background:#fafafa">`;
-            html += `<strong>Subtasks:</strong> ${subDone.length}/${subtasks.length} done<br/>`;
-
-            for (const s of subOpen) {
-              const sAssignee = s.assignee?.name || '';
-              const sDue = s.due_on ? ` (due ${s.due_on})` : '';
-              html += `☐ ${s.name}${sAssignee ? ` — ${sAssignee}` : ''}${sDue}<br/>`;
+            const subtasks = await getSubtasksDeep(t.gid);
+            if (subtasks.length > 0) {
+              const subDone = subtasks.filter((s: any) => s.completed).length;
+              html += `<tr><td colspan="3" style="background:#fafafa;padding:8px 12px">`;
+              html += `<strong style="font-size:12px">Subtasks (${subDone}/${subtasks.length} done):</strong>`;
+              html += renderSubtasks(subtasks);
+              html += `</td></tr>`;
             }
-            for (const s of subDone) {
-              html += `<span style="color:#888">☑ <s>${s.name}</s></span><br/>`;
-            }
-
-            html += `</td></tr>`;
           } catch {
             // Skip subtasks on error
           }
@@ -99,47 +121,49 @@ async function buildProjectNote(projectName: string, tasks: any[]): Promise<stri
       }
       html += '</table>';
     }
+
+    // Completed tasks in this section (collapsed summary)
+    if (sectionDone.length > 0) {
+      html += `<div style="margin-bottom:12px;padding:8px 12px;background:#f0f8f0;border-radius:4px">`;
+      html += `<strong style="color:#00856f;font-size:13px">Completed in ${section} (${sectionDone.length}):</strong><br/>`;
+      for (const t of sectionDone.slice(0, 10)) {
+        const assignee = t.assignee?.name || '';
+        const completedDate = t.completed_at
+          ? new Date(t.completed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+          : '';
+        html += `<span style="color:#888;font-size:12px"><span style="color:#00a86b">&#10003;</span> <s>${t.name}</s>`;
+        if (assignee) html += ` — ${assignee}`;
+        if (completedDate) html += ` (${completedDate})`;
+        html += `</span><br/>`;
+      }
+      if (sectionDone.length > 10) {
+        html += `<span style="color:#888;font-size:12px"><em>+ ${sectionDone.length - 10} more</em></span>`;
+      }
+      html += `</div>`;
+    }
   }
 
-  // Recently completed tasks
-  if (complete.length) {
-    // Sort by completion date, most recent first
-    const sorted = [...complete].sort((a, b) =>
-      (b.completed_at || '').localeCompare(a.completed_at || '')
-    );
-
-    html += `<h3>✅ Completed (${complete.length})</h3>`;
-    html += '<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%">';
-    html += '<tr style="background:#f0f8f0"><th style="text-align:left">Task</th><th>Completed By</th><th>Completed</th></tr>';
-
-    for (const t of sorted.slice(0, 30)) {
-      const assignee = t.assignee?.name || '—';
-      const completedDate = t.completed_at
-        ? new Date(t.completed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-        : '—';
-      html += `<tr><td><s>${t.name}</s></td><td style="text-align:center">${assignee}</td><td style="text-align:center">${completedDate}</td></tr>`;
-    }
-    if (complete.length > 30) {
-      html += `<tr><td colspan="3" style="text-align:center;color:#888"><em>+ ${complete.length - 30} more completed tasks</em></td></tr>`;
-    }
-    html += '</table>';
-  }
-
-  // Team summary
-  const assigneeTasks: Record<string, { open: number; done: number }> = {};
-  for (const t of tasks) {
+  // ===== TEAM WORKLOAD =====
+  const assigneeTasks: Record<string, { open: number; done: number; overdue: number }> = {};
+  for (const t of allTasks) {
     const name = t.assignee?.name || 'Unassigned';
-    if (!assigneeTasks[name]) assigneeTasks[name] = { open: 0, done: 0 };
-    if (t.completed) assigneeTasks[name].done++;
-    else assigneeTasks[name].open++;
+    if (!assigneeTasks[name]) assigneeTasks[name] = { open: 0, done: 0, overdue: 0 };
+    if (t.completed) {
+      assigneeTasks[name].done++;
+    } else {
+      assigneeTasks[name].open++;
+      if (t.due_on && t.due_on < today) assigneeTasks[name].overdue++;
+    }
   }
 
-  html += '<h3>👥 Team Workload</h3>';
+  html += '<hr/>';
+  html += '<h3>Team Workload</h3>';
   html += '<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%">';
-  html += '<tr style="background:#f0f0f0"><th style="text-align:left">Person</th><th>Open</th><th>Done</th></tr>';
+  html += '<tr style="background:#f5f5f5"><th style="text-align:left">Person</th><th style="width:60px">Open</th><th style="width:70px">Overdue</th><th style="width:60px">Done</th></tr>';
   const sortedAssignees = Object.entries(assigneeTasks).sort((a, b) => b[1].open - a[1].open);
   for (const [name, counts] of sortedAssignees) {
-    html += `<tr><td>${name}</td><td style="text-align:center">${counts.open}</td><td style="text-align:center">${counts.done}</td></tr>`;
+    const overdueStyle = counts.overdue > 0 ? 'color:#cc0000;font-weight:bold' : '';
+    html += `<tr><td>${name}</td><td style="text-align:center">${counts.open}</td><td style="text-align:center;${overdueStyle}">${counts.overdue}</td><td style="text-align:center">${counts.done}</td></tr>`;
   }
   html += '</table>';
 
@@ -147,28 +171,29 @@ async function buildProjectNote(projectName: string, tasks: any[]): Promise<stri
   return html;
 }
 
-// Sync a single mapping: delete old note, create new one if changed
+// Sync a single mapping
 async function syncOne(
   objectType: 'companies' | 'deals',
   objectId: string,
   mapping: { projectId: string; projectName: string; companyName?: string; dealName?: string },
-  syncState: SyncState
+  syncState: SyncState,
+  force: boolean = false
 ): Promise<{ status: string; reason?: string; error?: string }> {
   const key = `${objectType}:${objectId}`;
 
-  // Check if project has changed since last sync
   try {
     const projectInfo = await getProjectInfo(mapping.projectId);
     const lastModified = projectInfo.modified_at;
     const lastSynced = syncState.lastSync?.[key];
 
-    if (lastSynced && lastSynced === lastModified) {
+    // Skip if unchanged (unless forced)
+    if (!force && lastSynced && lastSynced === lastModified) {
       return { status: 'unchanged', reason: 'No changes since last sync' };
     }
 
-    // Fetch tasks and build note
-    const tasks = await getProjectTasks(mapping.projectId);
-    const note = await buildProjectNote(mapping.projectName, tasks);
+    // Fetch tasks grouped by section
+    const sectionedTasks = await getProjectTasksBySections(mapping.projectId);
+    const note = await buildProjectNote(mapping.projectName, sectionedTasks);
 
     if (!note) {
       return { status: 'skipped', reason: 'No tasks in project' };
@@ -201,37 +226,23 @@ export interface SyncResult {
   error?: string;
 }
 
-export async function runFullSync(): Promise<SyncResult[]> {
+export async function runFullSync(force: boolean = false): Promise<SyncResult[]> {
   const mappings = await getMappings();
   const syncState = await getSyncState();
   const results: SyncResult[] = [];
 
-  // Sync companies
   for (const [companyId, mapping] of Object.entries(mappings.companies || {})) {
     if (!mapping.projectId) continue;
-    const result = await syncOne('companies', companyId, mapping, syncState);
-    results.push({
-      type: 'company',
-      id: companyId,
-      name: mapping.companyName || '',
-      ...result,
-    });
+    const result = await syncOne('companies', companyId, mapping, syncState, force);
+    results.push({ type: 'company', id: companyId, name: mapping.companyName || '', ...result });
   }
 
-  // Sync deals
   for (const [dealId, mapping] of Object.entries(mappings.deals || {})) {
     if (!mapping.projectId) continue;
-    const result = await syncOne('deals', dealId, mapping, syncState);
-    results.push({
-      type: 'deal',
-      id: dealId,
-      name: mapping.dealName || '',
-      ...result,
-    });
+    const result = await syncOne('deals', dealId, mapping, syncState, force);
+    results.push({ type: 'deal', id: dealId, name: mapping.dealName || '', ...result });
   }
 
-  // Save updated sync state
   await saveSyncState(syncState);
-
   return results;
 }
