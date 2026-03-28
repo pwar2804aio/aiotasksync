@@ -226,7 +226,7 @@ export interface SyncResult {
   error?: string;
 }
 
-export async function runFullSync(force: boolean = false): Promise<SyncResult[]> {
+export async function runFullSync(force: boolean = false, runType: 'manual' | 'auto' = 'auto'): Promise<SyncResult[]> {
   const mappings = await getMappings();
   const syncState = await getSyncState();
   const results: SyncResult[] = [];
@@ -243,6 +243,6 @@ export async function runFullSync(force: boolean = false): Promise<SyncResult[]>
     results.push({ type: 'deal', id: dealId, name: mapping.dealName || '', ...result });
   }
 
-  await saveSyncState(syncState);
+  await saveSyncState(syncState, runType);
   return results;
 }

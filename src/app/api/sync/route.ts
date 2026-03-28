@@ -1,13 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { runFullSync } from '@/lib/sync';
+import { getSyncState } from '@/lib/store';
 
 // Manual sync (from UI button)
 export async function POST() {
   try {
     await requireAuth();
-    const results = await runFullSync(true);
-    return NextResponse.json({ results });
+    const results = await runFullSync(true, 'manual');
+    return NextResponse.json({ results, syncedAt: new Date().toISOString(), syncType: 'manual' });
   } catch (err: any) {
     const status = err.message === 'Unauthorized' ? 401 : 500;
     return NextResponse.json({ error: err.message }, { status });

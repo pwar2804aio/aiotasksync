@@ -24,6 +24,8 @@ export default function HomePage() {
   const [searching, setSearching] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncResults, setSyncResults] = useState<SyncResult[] | null>(null);
+  const [lastSyncTime, setLastSyncTime] = useState<string | null>(null);
+  const [lastSyncType, setLastSyncType] = useState<string | null>(null);
   const [asanaOk, setAsanaOk] = useState(false);
   const [hubspotOk, setHubspotOk] = useState(false);
   const searchTimer = useRef<any>(null);
@@ -41,11 +43,12 @@ export default function HomePage() {
   async function loadData() {
     setLoading(true);
     try {
-      const [companiesRes, dealsRes, projectsRes, mappingsRes] = await Promise.all([
+      const [companiesRes, dealsRes, projectsRes, mappingsRes, syncStatusRes] = await Promise.all([
         fetch('/api/hubspot/companies'),
         fetch('/api/hubspot/deals'),
         fetch('/api/asana/projects'),
         fetch('/api/mappings'),
+        fetch('/api/sync/status'),
       ]);
 
       if (companiesRes.ok) {
@@ -63,6 +66,11 @@ export default function HomePage() {
       if (mappingsRes.ok) {
         const m = await mappingsRes.json();
         if (!m.error) setMappings(m);
+      }
+      if (syncStatusRes.ok) {
+        const s = await syncStatusRes.json();
+        if (s.lastRun) setLastSyncTime(s.lastRun);
+        if (s.lastRunType) setLastSyncType(s.lastRunType);
       }
     } catch (err) {
       console.error('Load error:', err);
@@ -126,6 +134,8 @@ export default function HomePage() {
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       setSyncResults(data.results);
+      if (data.syncedAt) setLastSyncTime(data.syncedAt);
+      setLastSyncType('manual');
     } catch (err: any) {
       alert('Sync failed: ' + err.message);
     }
@@ -177,6 +187,11 @@ export default function HomePage() {
             {hubspotOk ? `HubSpot connected` : 'HubSpot: Not connected'}
           </span>
           <span style={{ flex: 1 }} />
+          {lastSyncTime && (
+            <span className="status-text" style={{ marginRight: 16 }}>
+              Last sync: {new Date(lastSyncTime).toLocaleString()} ({lastSyncType === 'manual' ? 'Manual' : 'Auto'})
+            </span>
+          )}
           <span className="status-text">{mappingCount} mapping{mappingCount !== 1 ? 's' : ''} configured</span>
         </div>
 
@@ -301,6 +316,11 @@ export default function HomePage() {
         {syncResults && (
           <div className="sync-results">
             <h3>Sync Results</h3>
+            {lastSyncTime && (
+              <p style={{ fontSize: 13, color: '#666', margin: '0 0 8px' }}>
+                Synced at {new Date(lastSyncTime).toLocaleString()} — <strong>{lastSyncType === 'manual' ? 'Manual Sync' : 'Auto Sync'}</strong>
+              </p>
+            )}
             {syncResults.map((r, i) => (
               <div key={i} className={`result-item ${r.status === 'unchanged' ? 'skipped' : r.status}`}>
                 <span>{r.status === 'success' ? '\u2713' : r.status === 'error' ? '\u2717' : '—'}</span>

@@ -84,6 +84,7 @@ export interface Mappings {
 export interface SyncState {
   lastSync: Record<string, string>;
   lastRun?: string;
+  lastRunType?: 'manual' | 'auto';
 }
 
 // --- Users ---
@@ -126,7 +127,8 @@ export async function getSyncState(): Promise<SyncState> {
   return kvGet<SyncState>('sync-state', { lastSync: {} });
 }
 
-export async function saveSyncState(state: SyncState): Promise<void> {
+export async function saveSyncState(state: SyncState, runType?: 'manual' | 'auto'): Promise<void> {
   state.lastRun = new Date().toISOString();
+  if (runType) state.lastRunType = runType;
   await kvSet('sync-state', state);
 }
