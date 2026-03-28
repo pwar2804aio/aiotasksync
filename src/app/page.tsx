@@ -193,6 +193,7 @@ export default function HomePage() {
             </span>
           )}
           <span className="status-text">{mappingCount} mapping{mappingCount !== 1 ? 's' : ''} configured</span>
+          <span className="status-text" style={{ marginLeft: 16, color: '#bbb', fontSize: 11 }}>v2.1</span>
         </div>
 
         {/* Asana project filter */}

@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
 import { runFullSync } from '@/lib/sync';
-import { getSyncState } from '@/lib/store';
 
 // Manual sync (from UI button)
 export async function POST() {
