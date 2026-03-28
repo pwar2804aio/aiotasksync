@@ -2,27 +2,21 @@ import { getMappings, getSyncState, saveSyncState, type SyncState } from './stor
 import { getProjectTasksBySections, getSubtasksDeep, getProjectInfo } from './asana';
 import { createNote, deleteNote, findSyncNotes } from './hubspot';
 
-// Render subtasks recursively as indented list
+// Render subtasks as simple indented bullets
 function renderSubtasks(subtasks: any[], indent: number = 0): string {
   let html = '';
-  const pad = 16 + (indent * 16);
+  const pad = 12 + (indent * 14);
   for (const s of subtasks) {
-    const assignee = s.assignee?.name ? ` — <em>${s.assignee.name}</em>` : '';
-    const due = s.due_on ? ` (due ${s.due_on})` : '';
     if (s.completed) {
-      const completedDate = s.completed_at
-        ? new Date(s.completed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+      const date = s.completed_at
+        ? ` (${new Date(s.completed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })})`
         : '';
-      html += `<div style="padding-left:${pad}px;color:#888">`;
-      html += `<span style="color:#00a86b">&#10003;</span> <s>${s.name}</s>${assignee}`;
-      if (completedDate) html += ` <span style="font-size:11px">(completed ${completedDate})</span>`;
-      html += `</div>`;
+      html += `<div style="padding-left:${pad}px;color:#999;font-size:12px">&#10003; <s>${s.name}</s>${date}</div>`;
     } else {
-      html += `<div style="padding-left:${pad}px">`;
-      html += `&#9744; <strong>${s.name}</strong>${assignee}${due}`;
-      html += `</div>`;
+      const assignee = s.assignee?.name ? ` — ${s.assignee.name}` : '';
+      const due = s.due_on ? ` (due ${s.due_on})` : '';
+      html += `<div style="padding-left:${pad}px;font-size:12px">&#9679; ${s.name}${assignee}${due}</div>`;
     }
-    // Nested subtasks
     if (s.subtasks?.length) {
       html += renderSubtasks(s.subtasks, indent + 1);
     }
@@ -30,144 +24,104 @@ function renderSubtasks(subtasks: any[], indent: number = 0): string {
   return html;
 }
 
-// Build the full project note
+// Format a due date nicely
+function formatDue(due: string, today: string): string {
+  if (!due) return '';
+  const isOverdue = due < today;
+  const d = new Date(due + 'T00:00:00');
+  const label = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  return isOverdue
+    ? `<span style="color:#cc0000;font-weight:bold">${label} (overdue)</span>`
+    : label;
+}
+
+// Build the full project note — clean, scannable format
 async function buildProjectNote(
   projectName: string,
   sectionedTasks: { section: string; tasks: any[] }[]
 ): Promise<string | null> {
-  // Flatten all tasks for stats
   const allTasks = sectionedTasks.flatMap(s => s.tasks);
   if (!allTasks.length) return null;
 
-  const incomplete = allTasks.filter(t => !t.completed);
-  const complete = allTasks.filter(t => t.completed);
-  const now = new Date().toLocaleDateString('en-US', {
-    year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit',
-  });
+  const open = allTasks.filter(t => !t.completed);
+  const done = allTasks.filter(t => t.completed);
   const today = new Date().toISOString().split('T')[0];
-
-  // Progress
-  const total = allTasks.length;
-  const doneCount = complete.length;
-  const pct = total > 0 ? Math.round((doneCount / total) * 100) : 0;
+  const overdue = open.filter(t => t.due_on && t.due_on < today);
+  const pct = Math.round((done.length / allTasks.length) * 100);
+  const now = new Date().toLocaleDateString('en-US', {
+    month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit',
+  });
 
   let html = '';
 
-  // ===== HEADER =====
-  html += `<h2>${projectName}</h2>`;
-  html += `<p><strong>Last synced:</strong> ${now}</p>`;
-  html += `<p><strong>Progress:</strong> ${pct}% complete (${doneCount} of ${total} tasks done)</p>`;
-
-  // Overdue warning
-  const overdue = incomplete.filter(t => t.due_on && t.due_on < today);
+  // ===== HEADER — one glance summary =====
+  html += `<h2 style="margin-bottom:4px">${projectName}</h2>`;
+  html += `<p style="color:#666;margin:0 0 8px"><strong>${pct}%</strong> complete &nbsp;&#8226;&nbsp; ${open.length} open &nbsp;&#8226;&nbsp; ${done.length} done`;
   if (overdue.length) {
-    html += `<p style="color:#cc0000"><strong>OVERDUE: ${overdue.length} task${overdue.length > 1 ? 's' : ''} past due date</strong></p>`;
+    html += ` &nbsp;&#8226;&nbsp; <span style="color:#cc0000"><strong>${overdue.length} overdue</strong></span>`;
+  }
+  html += `</p>`;
+
+  // ===== OVERDUE CALLOUT =====
+  if (overdue.length) {
+    html += `<div style="background:#fff5f5;border-left:3px solid #cc0000;padding:8px 12px;margin:8px 0">`;
+    html += `<strong style="color:#cc0000">Overdue</strong><br/>`;
+    for (const t of overdue) {
+      const assignee = t.assignee?.name || 'Unassigned';
+      const d = new Date(t.due_on + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+      html += `<div style="font-size:13px">&#9679; <strong>${t.name}</strong> — ${assignee} (was due ${d})</div>`;
+    }
+    html += `</div>`;
   }
 
-  html += '<hr/>';
-
-  // ===== OPEN TASKS BY SECTION =====
+  // ===== SECTIONS =====
   for (const { section, tasks } of sectionedTasks) {
     const sectionOpen = tasks.filter(t => !t.completed);
     const sectionDone = tasks.filter(t => t.completed);
-
     if (sectionOpen.length === 0 && sectionDone.length === 0) continue;
 
-    html += `<h3>${section} <span style="color:#888;font-weight:normal">(${sectionDone.length}/${tasks.length} done)</span></h3>`;
+    html += `<h3 style="margin:16px 0 6px;border-bottom:1px solid #eee;padding-bottom:4px">${section} <span style="color:#999;font-weight:normal;font-size:13px">(${sectionDone.length}/${tasks.length} done)</span></h3>`;
 
-    // Open tasks in this section
-    if (sectionOpen.length > 0) {
-      html += '<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%;margin-bottom:8px">';
-      html += '<tr style="background:#f5f5f5"><th style="text-align:left">Task</th><th style="width:120px">Assignee</th><th style="width:90px">Due</th></tr>';
+    // Open tasks — simple list, no tables
+    for (const t of sectionOpen) {
+      const assignee = t.assignee?.name || 'Unassigned';
+      const due = formatDue(t.due_on, today);
 
-      for (const t of sectionOpen) {
-        const assignee = t.assignee?.name || '<span style="color:#ccc">Unassigned</span>';
-        const due = t.due_on || '—';
-        const isOverdue = t.due_on && t.due_on < today;
-        const dueStyle = isOverdue ? 'color:#cc0000;font-weight:bold' : '';
-        const tags = (t.tags || []).map((tg: any) => `<span style="background:#e8e8e8;padding:1px 6px;border-radius:3px;font-size:11px">${tg.name}</span>`).join(' ');
+      html += `<div style="padding:4px 0">`;
+      html += `&#9744; <strong>${t.name}</strong>`;
+      html += `<span style="color:#666"> — ${assignee}</span>`;
+      if (due) html += ` &nbsp;&#8226;&nbsp; ${due}`;
+      html += `</div>`;
 
-        // Task name
-        let taskCell = `<strong>${t.name}</strong>`;
-        if (tags) taskCell += ` ${tags}`;
-
-        // Description
-        if (t.notes) {
-          const preview = t.notes.substring(0, 150).replace(/\n/g, ' ').replace(/</g, '&lt;');
-          taskCell += `<br/><span style="color:#666;font-size:12px">${preview}${t.notes.length > 150 ? '...' : ''}</span>`;
-        }
-
-        html += `<tr>`;
-        html += `<td>${taskCell}</td>`;
-        html += `<td style="text-align:center">${assignee}</td>`;
-        html += `<td style="text-align:center;${dueStyle}">${due}</td>`;
-        html += `</tr>`;
-
-        // Subtasks
-        if (t.num_subtasks > 0) {
-          try {
-            const subtasks = await getSubtasksDeep(t.gid);
-            if (subtasks.length > 0) {
-              const subDone = subtasks.filter((s: any) => s.completed).length;
-              html += `<tr><td colspan="3" style="background:#fafafa;padding:8px 12px">`;
-              html += `<strong style="font-size:12px">Subtasks (${subDone}/${subtasks.length} done):</strong>`;
-              html += renderSubtasks(subtasks);
-              html += `</td></tr>`;
-            }
-          } catch {
-            // Skip subtasks on error
+      // Subtasks inline
+      if (t.num_subtasks > 0) {
+        try {
+          const subtasks = await getSubtasksDeep(t.gid);
+          if (subtasks.length > 0) {
+            html += renderSubtasks(subtasks);
           }
-        }
+        } catch {}
       }
-      html += '</table>';
     }
 
-    // Completed tasks in this section (collapsed summary)
+    // Completed — compact summary
     if (sectionDone.length > 0) {
-      html += `<div style="margin-bottom:12px;padding:8px 12px;background:#f0f8f0;border-radius:4px">`;
-      html += `<strong style="color:#00856f;font-size:13px">Completed in ${section} (${sectionDone.length}):</strong><br/>`;
-      for (const t of sectionDone.slice(0, 10)) {
-        const assignee = t.assignee?.name || '';
-        const completedDate = t.completed_at
-          ? new Date(t.completed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+      html += `<div style="margin:6px 0 4px;color:#888;font-size:12px">`;
+      html += `<strong style="color:#00856f">&#10003; ${sectionDone.length} completed</strong>: `;
+      const names = sectionDone.slice(0, 5).map(t => {
+        const date = t.completed_at
+          ? ` (${new Date(t.completed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })})`
           : '';
-        html += `<span style="color:#888;font-size:12px"><span style="color:#00a86b">&#10003;</span> <s>${t.name}</s>`;
-        if (assignee) html += ` — ${assignee}`;
-        if (completedDate) html += ` (${completedDate})`;
-        html += `</span><br/>`;
-      }
-      if (sectionDone.length > 10) {
-        html += `<span style="color:#888;font-size:12px"><em>+ ${sectionDone.length - 10} more</em></span>`;
-      }
+        return `<s>${t.name}</s>${date}`;
+      });
+      html += names.join(', ');
+      if (sectionDone.length > 5) html += `, +${sectionDone.length - 5} more`;
       html += `</div>`;
     }
   }
 
-  // ===== TEAM WORKLOAD =====
-  const assigneeTasks: Record<string, { open: number; done: number; overdue: number }> = {};
-  for (const t of allTasks) {
-    const name = t.assignee?.name || 'Unassigned';
-    if (!assigneeTasks[name]) assigneeTasks[name] = { open: 0, done: 0, overdue: 0 };
-    if (t.completed) {
-      assigneeTasks[name].done++;
-    } else {
-      assigneeTasks[name].open++;
-      if (t.due_on && t.due_on < today) assigneeTasks[name].overdue++;
-    }
-  }
-
-  html += '<hr/>';
-  html += '<h3>Team Workload</h3>';
-  html += '<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;width:100%">';
-  html += '<tr style="background:#f5f5f5"><th style="text-align:left">Person</th><th style="width:60px">Open</th><th style="width:70px">Overdue</th><th style="width:60px">Done</th></tr>';
-  const sortedAssignees = Object.entries(assigneeTasks).sort((a, b) => b[1].open - a[1].open);
-  for (const [name, counts] of sortedAssignees) {
-    const overdueStyle = counts.overdue > 0 ? 'color:#cc0000;font-weight:bold' : '';
-    html += `<tr><td>${name}</td><td style="text-align:center">${counts.open}</td><td style="text-align:center;${overdueStyle}">${counts.overdue}</td><td style="text-align:center">${counts.done}</td></tr>`;
-  }
-  html += '</table>';
-
-  html += `<p style="color:#888;font-size:11px;margin-top:12px">Auto-synced by AIO TaskSync</p>`;
+  // ===== FOOTER =====
+  html += `<p style="color:#bbb;font-size:11px;margin-top:16px;border-top:1px solid #eee;padding-top:8px">Synced ${now} by AIO TaskSync</p>`;
   return html;
 }
 
