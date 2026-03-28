@@ -302,11 +302,16 @@ export default function HomePage() {
           <div className="sync-results">
             <h3>Sync Results</h3>
             {syncResults.map((r, i) => (
-              <div key={i} className={`result-item ${r.status}`}>
+              <div key={i} className={`result-item ${r.status === 'unchanged' ? 'skipped' : r.status}`}>
                 <span>{r.status === 'success' ? '\u2713' : r.status === 'error' ? '\u2717' : '—'}</span>
                 <strong>{r.type === 'company' ? 'Company' : 'Deal'}:</strong> {r.name}
                 <span style={{ flex: 1 }} />
-                <span>{r.status === 'error' ? r.error : r.status === 'skipped' ? r.reason : 'Note created'}</span>
+                <span>{
+                  r.status === 'success' ? 'Note updated' :
+                  r.status === 'unchanged' ? 'No changes' :
+                  r.status === 'error' ? r.error :
+                  r.reason || r.status
+                }</span>
               </div>
             ))}
           </div>

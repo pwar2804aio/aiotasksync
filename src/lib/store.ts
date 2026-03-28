@@ -87,3 +87,19 @@ export async function getMappings(): Promise<Mappings> {
 export async function saveMappings(mappings: Mappings): Promise<void> {
   await writeJSON('mappings.json', mappings);
 }
+
+// --- Sync State (tracks last sync per mapping to detect changes) ---
+
+export interface SyncState {
+  lastSync: Record<string, string>; // key: "companies:id" or "deals:id", value: project modified_at
+  lastRun?: string;
+}
+
+export async function getSyncState(): Promise<SyncState> {
+  return readJSON<SyncState>('sync-state.json', { lastSync: {} });
+}
+
+export async function saveSyncState(state: SyncState): Promise<void> {
+  state.lastRun = new Date().toISOString();
+  await writeJSON('sync-state.json', state);
+}

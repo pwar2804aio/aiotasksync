@@ -18,14 +18,12 @@ export async function getWorkspaces() {
 }
 
 export async function getProjects(workspaceId?: string) {
-  // Auto-detect workspace if not provided
   if (!workspaceId) {
     const workspaces = await getWorkspaces();
     if (workspaces.length === 0) throw new Error('No Asana workspaces found');
     workspaceId = workspaces[0].gid;
   }
 
-  // Paginate through ALL projects so none are missing
   const all: any[] = [];
   let offset: string | undefined;
   do {
@@ -41,9 +39,34 @@ export async function getProjects(workspaceId?: string) {
   return all;
 }
 
+const TASK_FIELDS = [
+  'name', 'completed', 'completed_at', 'assignee.name',
+  'due_on', 'due_at', 'notes', 'tags.name', 'num_subtasks',
+  'created_at', 'modified_at', 'memberships.section.name',
+].join(',');
+
 export async function getProjectTasks(projectId: string) {
+  const all: any[] = [];
+  let offset: string | undefined;
+  do {
+    let endpoint = `/projects/${projectId}/tasks?opt_fields=${TASK_FIELDS}&limit=100`;
+    if (offset) endpoint += `&offset=${offset}`;
+    const data = await asanaGet(endpoint);
+    all.push(...(data.data || []));
+    offset = data.next_page?.offset;
+  } while (offset);
+  return all;
+}
+
+export async function getSubtasks(taskId: string) {
   const data = await asanaGet(
-    `/projects/${projectId}/tasks?opt_fields=name,completed,assignee.name,due_on,notes,tags.name&limit=100`
+    `/tasks/${taskId}/subtasks?opt_fields=name,completed,assignee.name,due_on`
   );
   return data.data as any[];
+}
+
+// Get project metadata for last modified detection
+export async function getProjectInfo(projectId: string) {
+  const data = await asanaGet(`/projects/${projectId}?opt_fields=name,modified_at`);
+  return data.data as { gid: string; name: string; modified_at: string };
 }
