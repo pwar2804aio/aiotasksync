@@ -54,6 +54,7 @@ export default function LoginPage() {
           {loading ? 'Signing in...' : 'Sign In'}
         </button>
       </form>
+      <div style={{ textAlign: 'center', marginTop: 16, color: '#bbb', fontSize: 11 }}>v2.1</div>
     </div>
   );
 }
