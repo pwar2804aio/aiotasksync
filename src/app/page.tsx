@@ -114,6 +114,30 @@ export default function HomePage() {
     setLoading(false);
   }
 
+  // Refresh Asana projects + HubSpot data when opening Add Mapping
+  async function refreshForAddMapping() {
+    setView('add');
+    try {
+      const [projectsRes, companiesRes, dealsRes] = await Promise.all([
+        fetch('/api/asana/projects'),
+        fetch('/api/hubspot/companies'),
+        fetch('/api/hubspot/deals'),
+      ]);
+      if (projectsRes.ok) {
+        const p = await projectsRes.json();
+        if (!p.error) setProjects(p);
+      }
+      if (companiesRes.ok) {
+        const c = await companiesRes.json();
+        if (!c.error) setCompanies(c);
+      }
+      if (dealsRes.ok) {
+        const d = await dealsRes.json();
+        if (!d.error) setDeals(d);
+      }
+    } catch {}
+  }
+
   // Debounced search for HubSpot companies
   function searchCompanies(value: string) {
     setCompanySearch(value);
@@ -276,7 +300,7 @@ export default function HomePage() {
           </button>
           <button
             className={`toggle-btn ${view === 'add' ? 'active' : ''}`}
-            onClick={() => setView('add')}
+            onClick={refreshForAddMapping}
           >
             + Add Mapping
           </button>
@@ -294,7 +318,7 @@ export default function HomePage() {
               <div className="empty-state">
                 <h3>No mappings yet</h3>
                 <p>Connect an Asana project to a HubSpot company or deal to start syncing.</p>
-                <button className="btn btn-primary" onClick={() => setView('add')}>+ Add First Mapping</button>
+                <button className="btn btn-primary" onClick={refreshForAddMapping}>+ Add First Mapping</button>
               </div>
             ) : (
               <div className="connected-table">
