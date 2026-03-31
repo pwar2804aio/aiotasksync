@@ -243,6 +243,38 @@ body {
 .save-summary { font-size: 13px; flex: 1; }
 .save-actions { display: flex; gap: 8px; }
 
+/* Sync progress */
+.sync-progress {
+  margin-top: 20px;
+  background: white;
+  border-radius: 10px;
+  padding: 20px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+.sync-progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 10px;
+}
+.sync-progress-step { font-size: 14px; font-weight: 500; }
+.sync-progress-count { font-size: 13px; color: #888; }
+
+.progress-bar {
+  width: 100%;
+  height: 8px;
+  background: #eee;
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 16px;
+}
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #00bda5, #00d4b8);
+  border-radius: 4px;
+  transition: width 0.4s ease;
+}
+
 /* Sync results */
 .sync-results {
   margin-top: 20px;

@@ -55,6 +55,7 @@ export default function HomePage() {
   const [lastSyncType, setLastSyncType] = useState<string | null>(null);
   const [asanaOk, setAsanaOk] = useState(false);
   const [hubspotOk, setHubspotOk] = useState(false);
+  const [syncProgress, setSyncProgress] = useState<{ current: number; total: number; step: string } | null>(null);
 
   // Add mapping form state
   const [selectedProject, setSelectedProject] = useState('');
@@ -227,17 +228,58 @@ export default function HomePage() {
   async function runSync() {
     setSyncing(true);
     setSyncResults(null);
+    setSyncProgress(null);
+    const results: SyncResult[] = [];
+
     try {
       const res = await fetch('/api/sync', { method: 'POST' });
-      const data = await res.json();
-      if (data.error) throw new Error(data.error);
-      setSyncResults(data.results);
-      if (data.syncedAt) setLastSyncTime(data.syncedAt);
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || 'Sync failed');
+      }
+
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder();
+      if (!reader) throw new Error('No response stream');
+
+      let buffer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const lines = buffer.split('\n\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          const match = line.match(/^data: (.+)$/);
+          if (!match) continue;
+          try {
+            const event = JSON.parse(match[1]);
+            if (event.type === 'start') {
+              setSyncProgress({ current: 0, total: event.total, step: 'Starting sync...' });
+            } else if (event.type === 'progress') {
+              setSyncProgress({ current: event.current, total: event.total, step: event.step });
+            } else if (event.type === 'result') {
+              results.push(event.result);
+              setSyncResults([...results]);
+            } else if (event.type === 'error') {
+              throw new Error(event.error);
+            }
+          } catch (e: any) {
+            if (e.message && e.message !== 'Unexpected end of JSON input') throw e;
+          }
+        }
+      }
+
+      setLastSyncTime(new Date().toISOString());
       setLastSyncType('manual');
+      setSyncResults(results);
     } catch (err: any) {
       alert('Sync failed: ' + err.message);
     }
     setSyncing(false);
+    setSyncProgress(null);
   }
 
   async function logout() {
@@ -287,7 +329,7 @@ export default function HomePage() {
               Last sync: {new Date(lastSyncTime).toLocaleString()} ({lastSyncType === 'manual' ? 'Manual' : 'Auto'})
             </span>
           )}
-          <span className="status-text" style={{ marginLeft: 12, color: '#bbb', fontSize: 11 }}>v2.2</span>
+          <span className="status-text" style={{ marginLeft: 12, color: '#bbb', fontSize: 11 }}>v2.3</span>
         </div>
 
         {/* View toggle */}
@@ -368,8 +410,38 @@ export default function HomePage() {
               </div>
             )}
 
-            {/* Sync Results */}
-            {syncResults && (
+            {/* Sync Progress */}
+            {syncing && syncProgress && (
+              <div className="sync-progress">
+                <div className="sync-progress-header">
+                  <span className="sync-progress-step">{syncProgress.step}</span>
+                  <span className="sync-progress-count">{syncProgress.current} of {syncProgress.total}</span>
+                </div>
+                <div className="progress-bar">
+                  <div
+                    className="progress-fill"
+                    style={{ width: `${syncProgress.total > 0 ? (syncProgress.current / syncProgress.total) * 100 : 0}%` }}
+                  />
+                </div>
+                {/* Show results as they come in */}
+                {syncResults && syncResults.map((r, i) => (
+                  <div key={i} className={`result-item ${r.status === 'unchanged' ? 'skipped' : r.status}`}>
+                    <span>{r.status === 'success' ? '\u2713' : r.status === 'error' ? '\u2717' : '—'}</span>
+                    <strong>{r.type === 'company' ? 'Company' : 'Deal'}:</strong> {r.name}
+                    <span style={{ flex: 1 }} />
+                    <span>{
+                      r.status === 'success' ? 'Note updated' :
+                      r.status === 'unchanged' ? 'No changes' :
+                      r.status === 'error' ? r.error :
+                      r.reason || r.status
+                    }</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Sync Results (after sync completes) */}
+            {!syncing && syncResults && (
               <div className="sync-results">
                 <h3>Sync Results</h3>
                 {lastSyncTime && (

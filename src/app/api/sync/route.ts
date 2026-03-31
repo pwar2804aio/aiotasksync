@@ -1,22 +1,42 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth';
-import { runFullSync } from '@/lib/sync';
+import { runFullSync, runStreamingSync } from '@/lib/sync';
 
-// Manual sync (from UI button)
+// Manual sync (from UI button) — streams progress
 export async function POST() {
   try {
     await requireAuth();
-    const results = await runFullSync(true, 'manual');
-    return NextResponse.json({ results, syncedAt: new Date().toISOString(), syncType: 'manual' });
   } catch (err: any) {
     const status = err.message === 'Unauthorized' ? 401 : 500;
     return NextResponse.json({ error: err.message }, { status });
   }
+
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      try {
+        await runStreamingSync(true, 'manual', (event) => {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+        });
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done' })}\n\n`));
+      } catch (err: any) {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'error', error: err.message })}\n\n`));
+      }
+      controller.close();
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+    },
+  });
 }
 
 // Auto-sync (called by Vercel cron)
 export async function GET(req: NextRequest) {
-  // Verify cron secret to prevent unauthorized triggers
   const authHeader = req.headers.get('authorization');
   const cronSecret = process.env.CRON_SECRET;
 

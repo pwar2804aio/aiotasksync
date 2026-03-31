@@ -200,3 +200,53 @@ export async function runFullSync(force: boolean = false, runType: 'manual' | 'a
   await saveSyncState(syncState, runType);
   return results;
 }
+
+export interface StreamEvent {
+  type: 'start' | 'progress' | 'result' | 'done' | 'error';
+  total?: number;
+  current?: number;
+  name?: string;
+  step?: string;
+  result?: SyncResult;
+  error?: string;
+}
+
+export async function runStreamingSync(
+  force: boolean,
+  runType: 'manual' | 'auto',
+  onEvent: (event: StreamEvent) => void
+): Promise<void> {
+  const mappings = await getMappings();
+  const syncState = await getSyncState();
+
+  // Build list of all items to sync
+  const items: { objectType: 'companies' | 'deals'; id: string; mapping: any }[] = [];
+  for (const [companyId, mapping] of Object.entries(mappings.companies || {})) {
+    if (mapping.projectId) items.push({ objectType: 'companies', id: companyId, mapping });
+  }
+  for (const [dealId, mapping] of Object.entries(mappings.deals || {})) {
+    if (mapping.projectId) items.push({ objectType: 'deals', id: dealId, mapping });
+  }
+
+  onEvent({ type: 'start', total: items.length });
+
+  for (let i = 0; i < items.length; i++) {
+    const { objectType, id, mapping } = items[i];
+    const name = objectType === 'companies' ? (mapping.companyName || '') : (mapping.dealName || '');
+    const label = objectType === 'companies' ? 'Company' : 'Deal';
+
+    onEvent({ type: 'progress', current: i + 1, total: items.length, name, step: `Syncing ${label}: ${name}` });
+
+    const result = await syncOne(objectType, id, mapping, syncState, force);
+    const syncResult: SyncResult = {
+      type: objectType === 'companies' ? 'company' : 'deal',
+      id,
+      name,
+      ...result,
+    };
+
+    onEvent({ type: 'result', current: i + 1, total: items.length, result: syncResult });
+  }
+
+  await saveSyncState(syncState, runType);
+}
