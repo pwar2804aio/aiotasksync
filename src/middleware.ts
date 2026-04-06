@@ -9,7 +9,8 @@ export function middleware(request: NextRequest) {
     pathname.startsWith('/api/auth/login') ||
     pathname.startsWith('/_next') ||
     pathname.startsWith('/favicon') ||
-    (pathname === '/api/sync' && request.method === 'GET')
+    (pathname === '/api/sync' && request.method === 'GET') ||
+    (pathname.startsWith('/api/report/') && request.method === 'GET')
   ) {
     return NextResponse.next();
   }
