@@ -329,7 +329,7 @@ export default function HomePage() {
               Last sync: {new Date(lastSyncTime).toLocaleString()} ({lastSyncType === 'manual' ? 'Manual' : 'Auto'})
             </span>
           )}
-          <span className="status-text" style={{ marginLeft: 12, color: '#bbb', fontSize: 11 }}>v2.3</span>
+          <span className="status-text" style={{ marginLeft: 12, color: '#bbb', fontSize: 11 }}>v2.4</span>
         </div>
 
         {/* View toggle */}

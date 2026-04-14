@@ -1,5 +1,5 @@
 import { getMappings, getSyncState, saveSyncState, type SyncState } from './store';
-import { getProjectTasksBySections, getSubtasksDeep, getProjectInfo } from './asana';
+import { getProjectTasksBySections, getSubtasksDeep } from './asana';
 import { createNote, deleteNote, findSyncNotes } from './hubspot';
 
 // Render subtasks as simple indented bullets
@@ -136,14 +136,9 @@ async function syncOne(
   const key = `${objectType}:${objectId}`;
 
   try {
-    const projectInfo = await getProjectInfo(mapping.projectId);
-    const lastModified = projectInfo.modified_at;
-    const lastSynced = syncState.lastSync?.[key];
-
-    // Skip if unchanged (unless forced)
-    if (!force && lastSynced && lastSynced === lastModified) {
-      return { status: 'unchanged', reason: 'No changes since last sync' };
-    }
+    // Always regenerate — Asana project-level modified_at does not reflect subtask changes,
+    // so change detection at the project level causes stale notes. Since we have ~20
+    // mappings, the cost of always regenerating is acceptable.
 
     // Fetch tasks grouped by section
     const sectionedTasks = await getProjectTasksBySections(mapping.projectId);
@@ -162,8 +157,8 @@ async function syncOne(
     // Create new note
     await createNote(objectType, objectId, note);
 
-    // Update sync state
-    syncState.lastSync[key] = lastModified;
+    // Update sync state (timestamp-based)
+    syncState.lastSync[key] = new Date().toISOString();
 
     return { status: 'success' };
   } catch (err: any) {
