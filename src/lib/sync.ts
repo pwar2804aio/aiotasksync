@@ -76,24 +76,33 @@ async function buildProjectNote(
 
   // ===== SECTIONS =====
   for (const { section, tasks } of sectionedTasks) {
-    const sectionOpen = tasks.filter(t => !t.completed);
+    if (tasks.length === 0) continue;
     const sectionDone = tasks.filter(t => t.completed);
-    if (sectionOpen.length === 0 && sectionDone.length === 0) continue;
 
     html += `<h3 style="margin:16px 0 6px;border-bottom:1px solid #eee;padding-bottom:4px">${section} <span style="color:#999;font-weight:normal;font-size:13px">(${sectionDone.length}/${tasks.length} done)</span></h3>`;
 
-    // Open tasks — simple list, no tables
-    for (const t of sectionOpen) {
-      const assignee = t.assignee?.name || 'Unassigned';
-      const due = formatDue(t.due_on, today);
+    // Render tasks in Asana's original order — completed tasks keep their position,
+    // just shown with a checkmark and strikethrough.
+    for (const t of tasks) {
+      if (t.completed) {
+        const date = t.completed_at
+          ? ` <span style="color:#999">(${new Date(t.completed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })})</span>`
+          : '';
+        html += `<div style="padding:4px 0;color:#888">`;
+        html += `<span style="color:#00856f">&#10003;</span> <s>${t.name}</s>${date}`;
+        html += `</div>`;
+      } else {
+        const assignee = t.assignee?.name || 'Unassigned';
+        const due = formatDue(t.due_on, today);
 
-      html += `<div style="padding:4px 0">`;
-      html += `&#9744; <strong>${t.name}</strong>`;
-      html += `<span style="color:#666"> — ${assignee}</span>`;
-      if (due) html += ` &nbsp;&#8226;&nbsp; ${due}`;
-      html += `</div>`;
+        html += `<div style="padding:4px 0">`;
+        html += `&#9744; <strong>${t.name}</strong>`;
+        html += `<span style="color:#666"> — ${assignee}</span>`;
+        if (due) html += ` &nbsp;&#8226;&nbsp; ${due}`;
+        html += `</div>`;
+      }
 
-      // Subtasks inline
+      // Subtasks inline (for both open and completed parents)
       if (t.num_subtasks > 0) {
         try {
           const subtasks = await getSubtasksDeep(t.gid);
@@ -102,21 +111,6 @@ async function buildProjectNote(
           }
         } catch {}
       }
-    }
-
-    // Completed — compact summary
-    if (sectionDone.length > 0) {
-      html += `<div style="margin:6px 0 4px;color:#888;font-size:12px">`;
-      html += `<strong style="color:#00856f">&#10003; ${sectionDone.length} completed</strong>: `;
-      const names = sectionDone.slice(0, 5).map(t => {
-        const date = t.completed_at
-          ? ` (${new Date(t.completed_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })})`
-          : '';
-        return `<s>${t.name}</s>${date}`;
-      });
-      html += names.join(', ');
-      if (sectionDone.length > 5) html += `, +${sectionDone.length - 5} more`;
-      html += `</div>`;
     }
   }
 

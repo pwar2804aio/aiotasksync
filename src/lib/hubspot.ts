@@ -63,13 +63,6 @@ export async function searchCompanies(query: string) {
     limit: 50,
     properties: ['name', 'domain', 'num_associated_deals'],
     sorts: [{ propertyName: 'name', direction: 'ASCENDING' }],
-    filterGroups: [
-      {
-        filters: [
-          { propertyName: 'num_associated_deals', operator: 'GT', value: '0' },
-        ],
-      },
-    ],
   };
   if (query) {
     body.query = query;
